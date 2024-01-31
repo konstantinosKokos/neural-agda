@@ -50,12 +50,30 @@ class BinaryPathEncoder(Module):
         return self._pos_to_path[idx]
 
 
+class SequentialPositionEncoder(Module):
+    def __init__(self, dim: int, freq: int):
+        super(SequentialPositionEncoder, self).__init__()
+        self.dim = dim
+        self.freq = freq
+        pe = torch.zeros(freq, dim)
+        position = torch.arange(0, freq, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, dim, 2, dtype=torch.float) *
+                             - (torch.log(torch.tensor(freq, dtype=torch.float)) / dim))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        self._positional_embeddings = Parameter(pe, requires_grad=False)
+
+    def forward(self, length: int) -> Tensor:
+        return self._positional_embeddings[:length]
+
+
 class TokenEmbedding(Module):
     def __init__(self, dim: int, scope_dropout: float):
         super(TokenEmbedding, self).__init__()
         self.dim = dim
         self.scope_dropout = scope_dropout
         self.path_encoder = BinaryPathEncoder(dim=dim)
+        self.spe = SequentialPositionEncoder(dim=self.dim, freq=10000)
         self.embeddings = Embedding(num_embeddings=11, embedding_dim=dim)
         """
         Embedding map:
@@ -90,9 +108,10 @@ class TokenEmbedding(Module):
         db_mask = (token_types == 4)
 
         unique_paths, inverse = node_positions.unique(return_inverse=True)
-        # db_paths = torch.bucketize(token_values[db_mask], unique_paths)
+        db_paths = torch.bucketize(token_values[db_mask], unique_paths)
         positional_encodings = self.path_encoder.forward(unique_paths)
-        # db_encodings = positional_encodings[inverse[db_mask]] @ positional_encodings[db_paths]
+        db_encodings = positional_encodings[inverse[db_mask]] @ positional_encodings[db_paths]
+        pe = self.spe.forward(token_types.size(1)).unsqueeze(0)
 
         content_embeddings = torch.zeros(
             size=(*token_types.size(), self.dim),
@@ -101,6 +120,8 @@ class TokenEmbedding(Module):
         content_embeddings[sos_mask] = self.embeddings.weight[0]
         content_embeddings[bop_mask] = self.embeddings.forward(token_values[bop_mask] + 1)
         content_embeddings[nop_mask] = self.embeddings.forward(token_values[nop_mask] + 5)
-        content_embeddings[db_mask] = self.embeddings.weight[8]
+        content_embeddings[db_mask] = db_encodings @ self.embeddings.weight[8]
         content_embeddings[oos_mask] = self.embeddings.weight[10]
-        return content_embeddings, positional_encodings[inverse, :]
+        content_embeddings = content_embeddings + pe
+        identities = torch.eye(self.dim, dtype=content_embeddings.dtype, device=content_embeddings.device)[None, None]
+        return content_embeddings, identities.repeat(*inverse.size(), 1, 1)
