@@ -4,7 +4,7 @@ from torch.nn.functional import elu
 
 
 def taylor_2(x: Tensor) -> Tensor:
-    return elu(x + 1)
+    return elu(x) + 1
 
 
 def taylor_atn_fn(queries: Tensor, keys: Tensor, values: Tensor, mask: Tensor) -> Tensor:
