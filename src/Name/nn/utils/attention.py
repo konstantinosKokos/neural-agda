@@ -1,11 +1,10 @@
 import torch
 from torch import Tensor
+from torch.nn.functional import elu
 
 
 def taylor_2(x: Tensor) -> Tensor:
-    x0 = torch.ones(x.size()[:-1], device=x.device, dtype=x.dtype).unsqueeze(-1)
-    x2 = (torch.einsum('...i,...j->...ij', x, x)).flatten(-2) * (0.5 ** 0.5)
-    return torch.cat((x0, x, x2), dim=-1)
+    return elu(x + 1)
 
 
 def taylor_atn_fn(queries: Tensor, keys: Tensor, values: Tensor, mask: Tensor) -> Tensor:
